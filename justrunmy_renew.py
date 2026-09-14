@@ -139,10 +139,17 @@ def main():
             # 2. 打开 panel 抓取本账号全部 application
             sb.open("https://justrunmy.app/panel")
             sb.wait_for_ready_state_complete(timeout=30)
-            sb.sleep(4)
+            sb.sleep(10)
             import re as _re
             src = sb.get_page_source() or ""
+            # dump DOM 落 screenshots 方便 artifact 分析
+            with open(SCREENSHOT_DIR / "panel_dom.html", "w") as f:
+                f.write(src)
             app_links = sorted(set(_re.findall(r'href="(/panel/application/\d+/?)"', src)))
+            if not app_links:
+                # Blazor 可能用 data-url / onclick — 廣撒網
+                app_links = sorted(set(_re.findall(r'/panel/application/(\d+)', src)))
+                app_links = [f"/panel/application/{a}" for a in app_links]
             print(f"📦 发现 {len(app_links)} 个 application: {app_links}")
             save_shot(sb, "panel_apps.png")
             if not app_links:
