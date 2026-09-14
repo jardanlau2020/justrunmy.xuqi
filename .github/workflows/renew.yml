@@ -14,15 +14,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      JUSTRUNMY_COOKIE: ${{ secrets.JUSTRUNMY_COOKIE }}
+      JUSTRUNMY_EMAIL: ${{ secrets.JUSTRUNMY_EMAIL }}
+      JUSTRUNMY_PASSWORD: ${{ secrets.JUSTRUNMY_PASSWORD }}
       JUSTRUNMY_APP_URL: ${{ secrets.JUSTRUNMY_APP_URL }}
       TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
       TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-      SSH_HOST: ${{ secrets.SSH_HOST }}
-      SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
-      SSH_USER: ${{ secrets.SSH_USER }}
-      SSH_PASS: ${{ secrets.SSH_PASS }}
-      SOCKS_PORT: ${{ secrets.SOCKS_PORT || '51080' }}
       SCREENSHOT_DIR: screenshots
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -38,7 +34,7 @@ jobs:
       - name: 安装系统依赖
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb xdotool scrot fonts-noto-cjk sshpass openssh-client
+          sudo apt-get install -y xvfb xdotool scrot fonts-noto-cjk
 
       - name: 安装 Python 依赖
         run: |
@@ -48,41 +44,13 @@ jobs:
       - name: 运行续期脚本
         run: |
           mkdir -p screenshots
-          xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" \
-            python justrunmy_renew.py
+          xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24"             python justrunmy_renew.py
 
-      - name: 上传截图和页面诊断
+      - name: 上传截图
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: screenshots-${{ github.run_id }}
           path: |
             screenshots/
-            *.png
-            *.jpg
-          if-no-files-found: warn
-          retention-days: 7
-
-      - name: 提交执行时间
-        if: always()
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          mkdir -p justrunmy
-          date -u +'%Y-%m-%d %H:%M:%S UTC' > justrunmy/time.txt
-          git add justrunmy/time.txt
-          if ! git diff --cached --quiet; then
-            git commit -m "更新 JustRunMy 执行时间"
-            git pull --rebase origin main
-            git push origin HEAD:main
-          fi
-
-      - name: 自动清理历史工作流记录（只保留当前运行）
-        if: always()
-        run: |
-          echo "开始清理历史工作流记录..."
-          runs=$(gh run list --workflow="${{ github.workflow }}" --json databaseId --jq ".[] | select(.databaseId != ${{ github.run_id }}) | .databaseId")
-          for run_id in $runs; do
-            echo "正在删除运行记录: $run_id"
-            gh run delete "$run_id" || true
-          done
+          if-no-files-found: ignore
