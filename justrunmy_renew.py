@@ -149,22 +149,30 @@ def main():
                 # Blazor 卡片無 anchor —— 直接點擊卡片導航，跟 current_url 攞 app URL
                 app_links = []
                 try:
-                    card_count = sb.execute_script("""
-                        (() => {
-                            let cards = document.querySelectorAll('h3[title]');
-                            return cards.length;
-                        })()
-                    """)
+                    # 等卡片 render（Blazor SignalR 接手 SSR DOM 需時）
+                    for _ in range(30):
+                        cnt = sb.execute_script("return document.querySelectorAll('h3[title]').length")
+                        if isinstance(cnt, int) and cnt > 0:
+                            break
+                        sb.sleep(2)
+                    card_count = sb.execute_script("return document.querySelectorAll('h3[title]').length")
                     print(f"🃏 panel 上有 {card_count} 張 app 卡片")
+                    app_titles = sb.execute_script("""
+                        return Array.from(document.querySelectorAll('h3[title]').map(h => h.getAttribute('title')))
+                    """) or []
+                    print(f"🏷️ 卡片名: {app_titles}")
                     for i in range(int(card_count or 0)):
                         url_before = sb.get_current_url()
-                        # 點第 i 張卡片（每次重新 query，因為 Blazor re-render）
-                        sb.execute_script(f"""
-                            (() => {{
-                                let cards = document.querySelectorAll('h3[title]');
-                                if (cards[{i}]) cards[{i}].closest('.group')?.click();
-                            }})()
-                        """)
+                        # 用 selenium 原生 click 第 i 張卡片標題（Blazor 會接手導航）
+                        try:
+                            sb.click(f'div.group h3[title]:nth-of-type({i+1})', timeout=8)
+                        except Exception:
+                            sb.execute_script(f"""
+                                (() => {{
+                                    let cards = document.querySelectorAll('h3[title]');
+                                    if (cards[{i}]) cards[{i}].closest('.group')?.click();
+                                }})()
+                            """)
                         for _ in range(15):
                             sb.sleep(1)
                             url_now = sb.get_current_url() or ""
