@@ -158,7 +158,7 @@ def main():
                     card_count = sb.execute_script("return document.querySelectorAll('h3[title]').length")
                     print(f"🃏 panel 上有 {card_count} 張 app 卡片")
                     app_titles = sb.execute_script("""
-                        return Array.from(document.querySelectorAll('h3[title]').map(h => h.getAttribute('title')))
+                        return Array.from(document.querySelectorAll('h3[title]')).map(h => h.getAttribute('title'))
                     """) or []
                     print(f"🏷️ 卡片名: {app_titles}")
                     for i in range(int(card_count or 0)):
