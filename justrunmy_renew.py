@@ -136,46 +136,86 @@ def main():
 
             print(f"✅ 登录成功: {sb.get_current_url()}")
 
-            # 2. 打开应用控制台
-            sb.open(APP_URL)
+            # 2. 打开 panel 抓取本账号全部 application
+            sb.open("https://justrunmy.app/panel")
             sb.wait_for_ready_state_complete(timeout=30)
-            sb.sleep(5)
+            sb.sleep(4)
+            import re as _re
+            src = sb.get_page_source() or ""
+            app_links = sorted(set(_re.findall(r'href="(/panel/application/\d+/?)"', src)))
+            print(f"📦 发现 {len(app_links)} 个 application: {app_links}")
+            save_shot(sb, "panel_apps.png")
+            if not app_links:
+                app_links = [APP_URL.rstrip("/").split("justrunmy.app")[-1] or "/panel/application/39529/"]
+                print("⚠️ panel 未发现 application 链接，fallback 用 APP_URL")
 
-            # 3. 点击 Reset timer 打开弹窗
-            reset_xpath = ("//button[contains(translate(normalize-space(.), "
-                           "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'reset timer')]")
-            reset = first_visible(sb, [reset_xpath, "button:contains('Reset timer')"], 25)
-            if not reset:
-                save_shot(sb, "renew_reset_btn_not_found.png")
-                raise RuntimeError("找不到 Reset timer 按钮")
-            
-            sb.scroll_to(reset)
-            sb.click(reset)
-            sb.sleep(3)
-            save_shot(sb, "renew_confirmation_opened.png")
+            results = []
+            # 3. 逐个 application 走 Reset timer 流程
+            for idx, path in enumerate(app_links, 1):
+                app_url = f"https://justrunmy.app{path}"
+                print(f"--- [{idx}/{len(app_links)}] 处理 {app_url} ---")
+                try:
+                    sb.open(app_url)
+                    sb.wait_for_ready_state_complete(timeout=30)
+                    sb.sleep(5)
 
-            # 4. 免费点击弹窗里的 Cloudflare 验证框
-            try:
-                sb.uc_gui_click_captcha()
-                sb.sleep(3)
-            except Exception:
-                pass
+                    # 关闭可能的弹窗
+                    page_src = sb.get_page_source()
+                    if "Application is stopped" in page_src:
+                        print("▶️ 应用处于 Stopped，尝试点击 Start...")
+                        exact_start = "//button[translate(normalize-space(text()), 'START', 'start')='start']"
+                        try:
+                            if sb.is_element_visible(exact_start):
+                                sb.click(exact_start)
+                                sb.sleep(5)
+                        except Exception as e:
+                            print(f"⚠️ Start 点击失败: {e}")
 
-            # 5. 点击 Just Reset 按钮
-            confirm_xpath = ("//button[contains(translate(normalize-space(.), "
-                             "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'just reset')]")
-            confirm_btn = first_visible(sb, [confirm_xpath, "button:contains('Just Reset')"], 10)
-            
-            if not confirm_btn:
-                save_shot(sb, "confirm_btn_not_found.png")
-                raise RuntimeError("已打开弹窗，但未找到 Just Reset 按钮")
-            
-            sb.click(confirm_btn)
-            sb.sleep(5)
+                    # 点击 Reset timer 打开弹窗
+                    reset_xpath = ("//button[contains(translate(normalize-space(.), "
+                                   "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'reset timer')]")
+                    reset = first_visible(sb, [reset_xpath, "button:contains('Reset timer')"], 25)
+                    if not reset:
+                        save_shot(sb, f"renew_reset_btn_not_found_{idx}.png")
+                        print(f"⚠️ [{idx}] 找不到 Reset timer 按钮，跳过")
+                        results.append(f"{path}: 无 Reset timer 按钮")
+                        continue
 
-            save_shot(sb, "renew_success.png")
-            print("🎉 自动续期指令已成功提交！")
-            notify("✅ JustRunMy.app 自动续期成功！")
+                    sb.scroll_to(reset)
+                    sb.click(reset)
+                    sb.sleep(6)
+                    save_shot(sb, f"renew_confirmation_opened_{idx}.png")
+
+                    # 点击弹窗里的 Cloudflare 验证框
+                    try:
+                        sb.uc_gui_click_captcha()
+                        sb.sleep(3)
+                    except Exception as e:
+                        print(f"⚠️ captcha click: {e}")
+
+                    # 点击 Just Reset 按钮
+                    confirm_xpath = ("//button[contains(translate(normalize-space(.), "
+                                     "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'just reset')]")
+                    confirm_btn = first_visible(sb, [confirm_xpath, "button:contains('Just Reset')"], 10)
+                    if not confirm_btn:
+                        save_shot(sb, f"confirm_btn_not_found_{idx}.png")
+                        results.append(f"{path}: 无 Just Reset 按钮")
+                        continue
+
+                    sb.click(confirm_btn)
+                    sb.sleep(5)
+
+                    save_shot(sb, f"renew_success_{idx}.png")
+                    print(f"🎉 [{idx}] 自动续期指令已提交！")
+                    results.append(f"{path}: ✅ 续期提交成功")
+                except Exception as exc:
+                    save_shot(sb, f"renew_app_{idx}_failed.png")
+                    print(f"❌ [{idx}] {path} 处理失败: {exc}")
+                    results.append(f"{path}: ❌ {str(exc)[:80]}")
+
+            summary = "\n".join(results)
+            print(f"========== 全部结果 ==========\n{summary}")
+            notify(f"✅ JustRunMy.app 续期完成：\n{summary}")
 
         except Exception as exc:
             save_shot(sb, "renew_failed.png")
