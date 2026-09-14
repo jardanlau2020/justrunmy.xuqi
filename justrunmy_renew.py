@@ -142,14 +142,44 @@ def main():
             sb.sleep(10)
             import re as _re
             src = sb.get_page_source() or ""
-            # dump DOM 落 screenshots 方便 artifact 分析
             with open(SCREENSHOT_DIR / "panel_dom.html", "w") as f:
                 f.write(src)
             app_links = sorted(set(_re.findall(r'href="(/panel/application/\d+/?)"', src)))
             if not app_links:
-                # Blazor 可能用 data-url / onclick — 廣撒網
-                app_links = sorted(set(_re.findall(r'/panel/application/(\d+)', src)))
-                app_links = [f"/panel/application/{a}" for a in app_links]
+                # Blazor 卡片無 anchor —— 直接點擊卡片導航，跟 current_url 攞 app URL
+                app_links = []
+                try:
+                    card_count = sb.execute_script("""
+                        (() => {
+                            let cards = document.querySelectorAll('h3[title]');
+                            return cards.length;
+                        })()
+                    """)
+                    print(f"🃏 panel 上有 {card_count} 張 app 卡片")
+                    for i in range(int(card_count or 0)):
+                        url_before = sb.get_current_url()
+                        # 點第 i 張卡片（每次重新 query，因為 Blazor re-render）
+                        sb.execute_script(f"""
+                            (() => {{
+                                let cards = document.querySelectorAll('h3[title]');
+                                if (cards[{i}]) cards[{i}].closest('.group')?.click();
+                            }})()
+                        """)
+                        for _ in range(15):
+                            sb.sleep(1)
+                            url_now = sb.get_current_url() or ""
+                            if url_now and url_now != url_before and "/panel" in url_now:
+                                path = url_now.split("justrunmy.app")[-1].split("?")[0]
+                                if path not in app_links:
+                                    app_links.append(path)
+                                    print(f"➡️ 卡片[{i}] 導航至: {path}")
+                                break
+                        # 返轉 panel 繼續掃下一張卡
+                        if (sb.get_current_url() or "").endswith("/panel") is False:
+                            sb.open("https://justrunmy.app/panel")
+                            sb.sleep(6)
+                except Exception as e:
+                    print(f"⚠️ 卡片點擊導航失敗: {e}")
             print(f"📦 发现 {len(app_links)} 个 application: {app_links}")
             save_shot(sb, "panel_apps.png")
             if not app_links:
