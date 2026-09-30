@@ -52,23 +52,36 @@ def app_label(path):
 
 
 def build_tg(items, failure=""):
-    """組 Telegram 通知：一行統計 + 每項一行。
-
-    items 係 [(標籤, 狀態, 重點)]，狀態以 ✅/⏭️/❌ 開頭；
-    failure 係整體失敗原因（正常完成時留空）。純文本，冇 parse_mode。
-    """
+    """方案 B (極致精簡人話版): 每台精準兩行，徹底消滅頂部計數器"""
     items = list(items or [])
-    ok = sum(1 for item in items if item[1].startswith("✅"))
-    skip = sum(1 for item in items if item[1].startswith("⏭️"))
-    fail = sum(1 for item in items if item[1].startswith("❌")) + (1 if failure else 0)
-    lines = [f"🎮 JustRunMy ｜ {now_local()} ｜ ✅ {ok} ｜ ⏭️ {skip} ｜ ❌ {fail}"]
+    blocks = []
     for label, status, detail in items:
-        lines.append(f"▪️ {label} · {status}" + (f" · {clip_text(detail)}" if detail else ""))
+        name = f"JustRunMy（{label}）"
+        if status.startswith("✅"):
+            l1 = f"✅ {name} · 成功續期"
+            l2 = "ℹ️ 服務已自動展期"
+            blocks.append([l1, l2])
+        elif status.startswith("❌"):
+            l1 = f"🚨 {name} · 續期未完成"
+            reason = clip_text(detail or "執行失敗", 60)
+            l2 = f"⚠️ {reason} · 請登入面板手動處理"
+            blocks.append([l1, l2])
+        else: # ⏭️ / 狀態良好
+            l1 = f"🟢 {name} · 狀態良好"
+            info = clip_text(detail or "未到續期窗口", 60)
+            l2 = f"ℹ️ {info}"
+            blocks.append([l1, l2])
+
     if failure:
-        lines.append(f"❌ {clip_text(failure)}")
-    if fail:
-        lines.append("⚠️ 睇 workflow log 排查")
-    return "\n".join(lines)
+        blocks.append([
+            "🚨 JustRunMy · 續期未完成",
+            f"⚠️ {clip_text(failure, 60)} · 請登入面板手動處理"
+        ])
+
+    if not blocks:
+        return "🟢 JustRunMy · 檢查完成（未發現應用實例）"
+
+    return "\n\n".join("\n".join(b) for b in blocks)
 
 
 def wait_port(port, timeout=20):
