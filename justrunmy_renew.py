@@ -2,9 +2,11 @@
 # -*- coding: utf-8 -*-
 """JustRunMy.app 自动登录与续期 (100% 免费纯自动化版)"""
 import os
+import re
 import socket
 import subprocess
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -30,6 +32,43 @@ def notify(message):
         print("📩 Telegram 通知发送成功！")
     except Exception as exc:
         print(f"⚠️ Telegram 通知失败: {exc}")
+
+
+def now_local():
+    """GHA runner 係 UTC，通知統一顯示 UTC+8 嘅 MM-DD HH:MM。"""
+    return (datetime.now(timezone.utc) + timedelta(hours=8)).strftime("%m-%d %H:%M")
+
+
+def clip_text(text, limit=60):
+    """壓成單行再截短，方便塞入一行通知。"""
+    flat = " ".join(str(text or "").split())
+    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+
+
+def app_label(path):
+    """由 /panel/application/39529/ 抽短標籤，例如 app 39529。"""
+    match = re.search(r"/application/(\d+)", path or "")
+    return f"app {match.group(1)}" if match else (path or "?").strip("/") or "?"
+
+
+def build_tg(items, failure=""):
+    """組 Telegram 通知：一行統計 + 每項一行。
+
+    items 係 [(標籤, 狀態, 重點)]，狀態以 ✅/⏭️/❌ 開頭；
+    failure 係整體失敗原因（正常完成時留空）。純文本，冇 parse_mode。
+    """
+    items = list(items or [])
+    ok = sum(1 for item in items if item[1].startswith("✅"))
+    skip = sum(1 for item in items if item[1].startswith("⏭️"))
+    fail = sum(1 for item in items if item[1].startswith("❌")) + (1 if failure else 0)
+    lines = [f"🎮 JustRunMy ｜ {now_local()} ｜ ✅ {ok} ｜ ⏭️ {skip} ｜ ❌ {fail}"]
+    for label, status, detail in items:
+        lines.append(f"▪️ {label} · {status}" + (f" · {clip_text(detail)}" if detail else ""))
+    if failure:
+        lines.append(f"❌ {clip_text(failure)}")
+    if fail:
+        lines.append("⚠️ 睇 workflow log 排查")
+    return "\n".join(lines)
 
 
 def wait_port(port, timeout=20):
@@ -194,7 +233,7 @@ def main():
                 app_links = [APP_URL.rstrip("/").split("justrunmy.app")[-1] or "/panel/application/39529/"]
                 print("⚠️ panel 未发现 application 链接，fallback 用 APP_URL")
 
-            results = []
+            items = []
             # 3. 逐个 application 走 Reset timer 流程
             for idx, path in enumerate(app_links, 1):
                 app_url = f"https://justrunmy.app{path}"
@@ -223,7 +262,7 @@ def main():
                     if not reset:
                         save_shot(sb, f"renew_reset_btn_not_found_{idx}.png")
                         print(f"⚠️ [{idx}] 找不到 Reset timer 按钮，跳过")
-                        results.append(f"{path}: 无 Reset timer 按钮")
+                        items.append((app_label(path), "⏭️ 未可續", "無 Reset timer 按鈕"))
                         continue
 
                     sb.scroll_to(reset)
@@ -244,7 +283,7 @@ def main():
                     confirm_btn = first_visible(sb, [confirm_xpath, "button:contains('Just Reset')"], 10)
                     if not confirm_btn:
                         save_shot(sb, f"confirm_btn_not_found_{idx}.png")
-                        results.append(f"{path}: 无 Just Reset 按钮")
+                        items.append((app_label(path), "❌ 續期未完成", "搵唔到 Just Reset 按鈕"))
                         continue
 
                     sb.click(confirm_btn)
@@ -252,19 +291,19 @@ def main():
 
                     save_shot(sb, f"renew_success_{idx}.png")
                     print(f"🎉 [{idx}] 自动续期指令已提交！")
-                    results.append(f"{path}: ✅ 续期提交成功")
+                    items.append((app_label(path), "✅ 已續期", "Reset timer 已提交"))
                 except Exception as exc:
                     save_shot(sb, f"renew_app_{idx}_failed.png")
                     print(f"❌ [{idx}] {path} 处理失败: {exc}")
-                    results.append(f"{path}: ❌ {str(exc)[:80]}")
+                    items.append((app_label(path), "❌ 處理失敗", str(exc)))
 
-            summary = "\n".join(results)
+            summary = build_tg(items)
             print(f"========== 全部结果 ==========\n{summary}")
-            notify(f"✅ JustRunMy.app 续期完成：\n{summary}")
+            notify(summary)
 
         except Exception as exc:
             save_shot(sb, "renew_failed.png")
-            notify(f"❌ JustRunMy.app 自动续期失败: {exc}")
+            notify(build_tg([], failure=str(exc)))
             raise
         finally:
             if ssh_process and ssh_process.poll() is None:
